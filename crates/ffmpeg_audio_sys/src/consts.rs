@@ -40,6 +40,12 @@ pub const AVSEEK_SIZE: i32 = 0x10000;
 /// This is the default and therefore ignored by the seek code since 2010.
 pub const AVSEEK_FORCE: i32 = 0x20000;
 
+/// Undefined timestamp value
+///
+/// Usually reported by demuxer that work on containers that do not provide
+/// either pts or dts.
+pub const AV_NOPTS_VALUE: i64 = i64::MIN;
+
 /// FFmpeg Logging Constants
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {

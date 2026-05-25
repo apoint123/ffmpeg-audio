@@ -200,22 +200,24 @@ impl Demuxer {
         unsafe {
             let stream_ptr = *(*self.ctx).streams.add(self.audio_stream_idx);
             let stream_duration = (*stream_ptr).duration;
-            let time_base = (*stream_ptr).time_base;
 
-            if stream_duration > 0 && time_base.num > 0 && time_base.den > 0 {
-                let secs = stream_duration as f64 * f64::from(time_base.num)
-                    / f64::from(time_base.den);
-                if let Ok(d) = Duration::try_from_secs_f64(secs) {
-                    return Some(d);
+            if stream_duration >= 0 && stream_duration != sys::AV_NOPTS_VALUE {
+                let time_base = (*stream_ptr).time_base;
+
+                let bq = sys::AVRational {
+                    num: 1,
+                    den: sys::AV_TIME_BASE.cast_signed(),
+                };
+                let duration_us = sys::av_rescale_q(stream_duration, time_base, bq);
+
+                if duration_us >= 0 {
+                    return Some(Duration::from_micros(duration_us.cast_unsigned()));
                 }
             }
 
             let ctx_duration = (*self.ctx).duration;
-            if ctx_duration > 0 {
-                let secs = ctx_duration as f64 / f64::from(sys::AV_TIME_BASE);
-                if let Ok(d) = Duration::try_from_secs_f64(secs) {
-                    return Some(d);
-                }
+            if ctx_duration >= 0 && ctx_duration != sys::AV_NOPTS_VALUE {
+                return Some(Duration::from_micros(ctx_duration.cast_unsigned()));
             }
 
             None
