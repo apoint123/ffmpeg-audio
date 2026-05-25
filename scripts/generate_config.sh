@@ -30,7 +30,7 @@ OPTIONS=(
     --disable-inline-asm
 )
 
-DEMUXERS="aac,ac3,aiff,amr,ape,asf,au,caf,dsf,dsdiff,dts,dtshd,eac3,flac,iff,m4v,matroska,mov,mp3,mpc,mpc8,ogg,rm,spdif,tak,truehd,tta,w64,wav,wv"
+DEMUXERS="aac,ac3,aiff,amr,ape,asf,au,caf,dsdiff,dsf,dts,dtshd,eac3,flac,iff,m4v,matroska,mov,mp3,mpc,mpc8,ogg,rm,spdif,tak,truehd,tta,w64,wav,wv"
 DECODERS="aac,aac_latm,ac3,adpcm_ima_wav,adpcm_ms,adpcm_swf,alac,als,amrnb,amrwb,ape,cook,dca,dsd_lsbf,dsd_lsbf_planar,dsd_msbf,dsd_msbf_planar,eac3,flac,mlp,mp3,mpc7,mpc8,opus,pcm_alaw,pcm_bluray,pcm_dvd,pcm_f32be,pcm_f32le,pcm_f64be,pcm_f64le,pcm_mulaw,pcm_s16be,pcm_s16le,pcm_s24be,pcm_s24le,pcm_s32be,pcm_s32le,pcm_s8,pcm_u16be,pcm_u16le,pcm_u24be,pcm_u24le,pcm_u32be,pcm_u32le,pcm_u8,ra_144,ra_288,shorten,tak,truehd,tta,vorbis,wavpack,wmalossless,wmapro,wmav1,wmav2,wmavoice"
 PARSERS="aac,aac_latm,ac3,amr,cook,dca,flac,mlp,mpegaudio,opus,sipr,tak,vorbis,wma"
 
