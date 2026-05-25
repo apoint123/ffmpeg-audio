@@ -40,6 +40,8 @@ pub struct SourceAudioInfo {
     pub bit_rate: i64,
     pub sample_fmt: String,
     pub codec_name: String,
+    /// 原始位深：FLAC 24bit 在解码后 sample_fmt 是 s32，但 bits_per_sample 仍是 24
+    pub bits_per_sample: i32,
 }
 
 pub struct AudioReader {
@@ -104,12 +106,21 @@ impl AudioReader {
                 demuxer.bit_rate()
             };
 
+            let bits_per_raw = (*codec_params).bits_per_raw_sample;
+            let bits_per_coded = (*codec_params).bits_per_coded_sample;
+            let bits_per_sample = if bits_per_raw > 0 {
+                bits_per_raw
+            } else {
+                bits_per_coded
+            };
+
             SourceAudioInfo {
                 sample_rate: decoder.sample_rate(),
                 channels: decoder.channels(),
                 bit_rate,
                 sample_fmt: sample_fmt_str,
                 codec_name,
+                bits_per_sample,
             }
         };
 
@@ -131,6 +142,11 @@ impl AudioReader {
     #[must_use]
     pub fn metadata(&self) -> HashMap<String, String> {
         self.demuxer.metadata()
+    }
+
+    #[must_use]
+    pub fn duration(&self) -> Option<Duration> {
+        self.demuxer.duration()
     }
 
     #[must_use]

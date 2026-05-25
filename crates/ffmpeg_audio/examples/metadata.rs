@@ -24,6 +24,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("采样率:   {} Hz", info.sample_rate);
     println!("声道数:   {}", info.channels);
     println!("码率:     {} kbps", info.bit_rate / 1000);
+    if let Some(dur) = reader.duration() {
+        println!("时长:     {:.3} s", dur.as_secs_f64());
+    } else {
+        println!("时长:     (未知)");
+    }
 
     println!("\n=== 音频元数据 ===");
     let metadata = reader.metadata();

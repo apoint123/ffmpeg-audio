@@ -195,6 +195,28 @@ impl Demuxer {
     pub fn bit_rate(&self) -> i64 {
         unsafe { (*self.ctx).bit_rate }
     }
+
+    pub fn duration(&self) -> Option<Duration> {
+        unsafe {
+            let stream_ptr = *(*self.ctx).streams.add(self.audio_stream_idx);
+            let stream_duration = (*stream_ptr).duration;
+            let time_base = (*stream_ptr).time_base;
+
+            if stream_duration > 0 && time_base.num > 0 && time_base.den > 0 {
+                let secs = stream_duration as f64 * f64::from(time_base.num)
+                    / f64::from(time_base.den);
+                return Some(Duration::from_secs_f64(secs));
+            }
+
+            let ctx_duration = (*self.ctx).duration;
+            if ctx_duration > 0 {
+                let secs = ctx_duration as f64 / f64::from(sys::AV_TIME_BASE);
+                return Some(Duration::from_secs_f64(secs));
+            }
+
+            None
+        }
+    }
 }
 
 unsafe fn extract_dict(dict: *mut sys::AVDictionary, map: &mut HashMap<String, String>) {

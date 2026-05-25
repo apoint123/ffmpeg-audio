@@ -79,6 +79,20 @@ fn test_audio_pipeline_and_signal_validation() {
 }
 
 #[test]
+fn test_audio_duration() {
+    let wav_data = generate_sine_wav(2.0);
+    let source = Cursor::new(wav_data);
+
+    let reader = AudioReader::new(source, 48000, 2).unwrap();
+    let duration = reader.duration().expect("应能拿到 WAV 时长");
+    let secs = duration.as_secs_f64();
+    assert!(
+        (1.99..=2.01).contains(&secs),
+        "时长应约为 2s，实际 {secs}"
+    );
+}
+
+#[test]
 fn test_audio_seek_functionality() {
     let wav_data = generate_sine_wav(2.0);
     let source = Cursor::new(wav_data);
