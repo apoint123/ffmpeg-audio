@@ -34,14 +34,34 @@ pub struct AudioCover {
 }
 
 #[derive(Debug, Clone)]
-#[non_exhaustive]
 pub struct SourceAudioInfo {
+    /// Samples per second.
     pub sample_rate: i32,
+
+    /// Number of channels.
     pub channels: i32,
+
+    /// The average bitrate of the encoded data (in bits per second).
     pub bit_rate: i64,
+
+    /// Audio sample format.
     pub sample_fmt: String,
+
+    /// The name of a codec.
     pub codec_name: String,
-    /// 原始位深：FLAC 24bit 在解码后 sample_fmt 是 s32，但 bits_per_sample 仍是 24
+
+    /// This is the number of valid bits in each output sample.
+    ///
+    /// If the sample format has more bits, the least significant bits are additional
+    /// padding bits, which are always `0`. Use right shifts to reduce the sample
+    /// to its actual size. For example, audio formats with 24 bit samples will
+    /// have `bits_per_raw_sample` set to `24`, and format set to `AV_SAMPLE_FMT_S32`.
+    ///
+    /// To get the original sample use `(int32_t)sample >> 8`.
+    ///
+    /// For ADPCM this might be `12` or `16` or similar
+    ///
+    /// Can be 0
     pub bits_per_sample: i32,
 }
 

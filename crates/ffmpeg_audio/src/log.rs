@@ -1,25 +1,17 @@
 use std::sync::Once;
 
-use crate::sys;
+use ffmpeg_audio_sys::LogLevel;
 
-pub use crate::sys::{
-    AV_LOG_DEBUG,
-    AV_LOG_ERROR,
-    AV_LOG_FATAL,
-    AV_LOG_INFO,
-    AV_LOG_TRACE,
-    AV_LOG_VERBOSE,
-    AV_LOG_WARNING,
-};
+use crate::sys;
 
 static INIT_LOGGING: Once = Once::new();
 
-/// 调用方覆盖 FFmpeg 日志级别
-/// 内部先触发 init_ffmpeg_logging（Once 幂等），避免后续 AudioReader::new 反向覆盖
-pub fn set_log_level(level: i32) {
+/// Set the log level for FFmpeg
+pub fn set_log_level(level: LogLevel) {
     init_ffmpeg_logging();
+
     unsafe {
-        sys::av_log_set_level(level);
+        sys::av_log_set_level(level.into());
     }
 }
 

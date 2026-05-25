@@ -39,3 +39,59 @@ pub const AVSEEK_SIZE: i32 = 0x10000;
 /// normally unreasonable means that can be extremely slow.
 /// This is the default and therefore ignored by the seek code since 2010.
 pub const AVSEEK_FORCE: i32 = 0x20000;
+
+/// FFmpeg Logging Constants
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum LogLevel {
+    /// Print no output.
+    Quiet,
+
+    /// Something went really wrong and we will crash now.
+    Panic,
+
+    /// Something went wrong and recovery is not possible.
+    ///
+    /// For example, no header was found for a format which depends
+    /// on headers or an illegal combination of parameters is used.
+    Fatal,
+
+    /// Something went wrong and cannot losslessly be recovered.
+    ///
+    /// However, not all future data is affected.
+    Error,
+
+    /// Something somehow does not look correct.
+    ///
+    /// This may or may not lead to problems. An example would be the use of
+    /// `-vstrict -2`.
+    Warning,
+
+    /// Standard information.
+    Info,
+
+    /// Detailed information.
+    Verbose,
+
+    /// Stuff which is only useful for libav* developers.
+    Debug,
+
+    /// Extremely verbose debugging, useful for libav* development.
+    Trace,
+}
+
+#[rustfmt::skip]
+impl From<LogLevel> for i32 {
+    fn from(level: LogLevel) -> Self {
+        match level {
+            LogLevel::Quiet   => super::AV_LOG_QUIET,
+            LogLevel::Panic   => super::AV_LOG_PANIC.cast_signed(),
+            LogLevel::Fatal   => super::AV_LOG_FATAL.cast_signed(),
+            LogLevel::Error   => super::AV_LOG_ERROR.cast_signed(),
+            LogLevel::Warning => super::AV_LOG_WARNING.cast_signed(),
+            LogLevel::Info    => super::AV_LOG_INFO.cast_signed(),
+            LogLevel::Verbose => super::AV_LOG_VERBOSE.cast_signed(),
+            LogLevel::Debug   => super::AV_LOG_DEBUG.cast_signed(),
+            LogLevel::Trace   => super::AV_LOG_TRACE.cast_signed(),
+        }
+    }
+}
