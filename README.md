@@ -4,7 +4,7 @@ Minimal FFmpeg audio decoding wrapper. Network handled by the caller via `Read +
 
 ## Features
 
-- `AudioReader::new(impl Read + Seek, sample_rate, channels)` → interleaved f32 stereo
+- `AudioReader::new(impl Read + Seek, sample_rate, channels)` → interleaved f32
 - FFmpeg vendored, no env vars
 - Decoders: MP3, AAC, FLAC, Opus, Vorbis, ALAC, APE, WAV, WMA, DSD, DCA, EAC3, TrueHD
 

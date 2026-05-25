@@ -14,10 +14,12 @@ pub use crate::sys::{
 
 static INIT_LOGGING: Once = Once::new();
 
-/// 调用方覆盖 FFmpeg 日志级别（init_ffmpeg_logging 之后生效）
-pub fn set_log_level(level: u32) {
+/// 调用方覆盖 FFmpeg 日志级别
+/// 内部先触发 init_ffmpeg_logging（Once 幂等），避免后续 AudioReader::new 反向覆盖
+pub fn set_log_level(level: i32) {
+    init_ffmpeg_logging();
     unsafe {
-        sys::av_log_set_level(level.cast_signed());
+        sys::av_log_set_level(level);
     }
 }
 

@@ -34,6 +34,7 @@ pub struct AudioCover {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SourceAudioInfo {
     pub sample_rate: i32,
     pub channels: i32,

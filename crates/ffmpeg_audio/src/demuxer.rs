@@ -205,13 +205,17 @@ impl Demuxer {
             if stream_duration > 0 && time_base.num > 0 && time_base.den > 0 {
                 let secs = stream_duration as f64 * f64::from(time_base.num)
                     / f64::from(time_base.den);
-                return Some(Duration::from_secs_f64(secs));
+                if let Ok(d) = Duration::try_from_secs_f64(secs) {
+                    return Some(d);
+                }
             }
 
             let ctx_duration = (*self.ctx).duration;
             if ctx_duration > 0 {
                 let secs = ctx_duration as f64 / f64::from(sys::AV_TIME_BASE);
-                return Some(Duration::from_secs_f64(secs));
+                if let Ok(d) = Duration::try_from_secs_f64(secs) {
+                    return Some(d);
+                }
             }
 
             None
