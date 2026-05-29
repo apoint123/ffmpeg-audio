@@ -192,8 +192,10 @@ impl Resampler {
 
             let f64_count = bytes_needed.div_ceil(mem::size_of::<f64>());
 
-            self.out_buffer
-                .reserve(f64_count.saturating_sub(self.out_buffer.capacity()));
+            // len is always 0, so capacity must reach f64_count or swr_convert overruns
+            if self.out_buffer.capacity() < f64_count {
+                self.out_buffer.reserve(f64_count);
+            }
 
             let out_ptr = self.out_buffer.as_mut_ptr().cast::<u8>();
 
