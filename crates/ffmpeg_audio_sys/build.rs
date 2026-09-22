@@ -409,7 +409,12 @@ mod system {
 
     use crate::utils;
 
-    const REQUIRED_LIBS: [&str; 4] = ["libavcodec", "libavformat", "libavutil", "libswresample"];
+    const REQUIRED_LIBS: [(&str, &str); 4] = [
+        ("libavcodec", "62.28.102"),
+        ("libavformat", "62.12.102"),
+        ("libavutil", "60.26.102"),
+        ("libswresample", "6.3.102"),
+    ];
 
     pub fn build(out_dir: &Path, target_os: &str) {
         println!("cargo:warning=ffmpeg_slim.zip not found, attempting to find an installed FFmpeg");
@@ -434,9 +439,9 @@ mod system {
         }
 
         if include_paths.is_empty() {
-            for lib in &REQUIRED_LIBS {
+            for &(lib, version) in &REQUIRED_LIBS {
                 let library = pkg_config::Config::new()
-                    .atleast_version("61.0")
+                    .atleast_version(version)
                     .probe(lib)
                     .unwrap_or_else(|e| panic!("Failed to find {lib}: {e} "));
                 include_paths.extend(library.include_paths);
