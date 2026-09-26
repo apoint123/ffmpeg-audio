@@ -7,6 +7,10 @@ mod utils {
     use std::{
         env,
         fs,
+        hash::{
+            DefaultHasher,
+            Hasher,
+        },
         io::{
             self,
         },
@@ -72,9 +76,36 @@ mod utils {
         matched_dir.to_string()
     }
 
-    pub fn extract_zip(zip_path: &Path, dest: &Path) -> io::Result<()> {
-        let file = fs::File::open(zip_path)?;
-        let mut archive = zip::ZipArchive::new(file)
+    /// Extracts `zip_path` into `dest`, unless `dest` already holds an extraction of the same
+    /// archive.
+    ///
+    /// `OUT_DIR` does not change when the bundled archives are updated, so the archive's hash is
+    /// recorded in a stamp file next to `dest`. A changed archive, or an extraction that never
+    /// completed, causes `dest` to be wiped and extracted again.
+    pub fn extract_zip_if_changed(zip_path: &Path, dest: &Path) -> io::Result<()> {
+        let data = fs::read(zip_path)?;
+        let mut hasher = DefaultHasher::new();
+        hasher.write(&data);
+        let hash = hasher.finish();
+        let hash = format!("{hash:016x}");
+
+        let stamp = dest.with_extension("stamp");
+        if dest.exists() && fs::read_to_string(&stamp).is_ok_and(|s| s == hash) {
+            return Ok(());
+        }
+
+        if stamp.exists() {
+            fs::remove_file(&stamp)?;
+        }
+        if dest.exists() {
+            fs::remove_dir_all(dest)?;
+        }
+        extract_zip(&data, dest)?;
+        fs::write(&stamp, hash)
+    }
+
+    fn extract_zip(data: &[u8], dest: &Path) -> io::Result<()> {
+        let mut archive = zip::ZipArchive::new(io::Cursor::new(data))
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         for i in 0..archive.len() {
@@ -237,14 +268,10 @@ mod bundled {
             let ffmpeg_dir = out_dir.join("ffmpeg_slim");
             let configs_base = out_dir.join("configs");
 
-            if !ffmpeg_dir.exists() {
-                utils::extract_zip(&slim_zip, &ffmpeg_dir)
-                    .map_err(|e| format!("Failed to extract ffmpeg_slim.zip: {e}"))?;
-            }
-            if !configs_base.exists() {
-                utils::extract_zip(&configs_zip, &configs_base)
-                    .map_err(|e| format!("Failed to extract configs.zip: {e}"))?;
-            }
+            utils::extract_zip_if_changed(&slim_zip, &ffmpeg_dir)
+                .map_err(|e| format!("Failed to extract ffmpeg_slim.zip: {e}"))?;
+            utils::extract_zip_if_changed(&configs_zip, &configs_base)
+                .map_err(|e| format!("Failed to extract configs.zip: {e}"))?;
             Ok((ffmpeg_dir, configs_base))
         }
     }
