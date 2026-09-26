@@ -3,7 +3,7 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"lint": "biome lint . --error-on-warnings",
+		"lint": "biome check . --error-on-warnings",
 		"format": "biome format --write .",
 		"format:check": "biome format .",
 		"typecheck": "tsc -b",
@@ -11,13 +11,13 @@
 		"generate:config": "node scripts/generate_config.ts"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.5.3",
+		"@biomejs/biome": "^2.5.14",
 		"@types/node": "^26.1.1",
 		"tinyglobby": "^0.2.17",
 		"typescript": "^7.0.2"
 	},
 	"dependencies": {
-		"jszip": "^3.10.1"
+		"jszip": "^3.10.2"
 	},
-	"packageManager": "pnpm@11.10.0"
+	"packageManager": "pnpm@12.6.0"
 }

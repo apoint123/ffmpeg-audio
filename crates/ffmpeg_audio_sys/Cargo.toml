@@ -16,7 +16,7 @@ doctest = false
 libc = "0.2"
 
 [build-dependencies]
-bindgen = "0.72"
+bindgen = "0.73"
 cc = { version = "1", features = ["parallel"] }
 pkg-config = "0.3"
 vcpkg = "0.2"
