@@ -12,12 +12,17 @@ use crate::{
     Decoder,
     Demuxer,
     Result,
-    TimeBase,
+    core::{
+        frame::frame_timing,
+        timeline::{
+            FramePlacement,
+            Timeline,
+        },
+    },
     decode::{
         SeekMode,
         io::IoContext,
     },
-    sys,
 };
 
 /// Specifies the strategy used to scan an audio stream to determine its exact duration.
@@ -43,7 +48,8 @@ pub enum ScanMode {
 ///
 /// This engine acts as a unified abstraction over FFmpeg's underlying parsing (`Demuxer`)
 /// and decompression (`Decoder`) stages. It encapsulates the complex send/receive
-/// state machines, timestamp alignments, and buffering required to safely yield raw audio frames.
+/// state machines and buffering required to safely yield raw audio frames, and relies on the
+/// [`Timeline`] for every timestamp decision.
 pub struct DecodeEngine {
     /// The underlying component responsible for reading and parsing the media container.
     demuxer: Demuxer,
@@ -51,35 +57,30 @@ pub struct DecodeEngine {
     /// The underlying component responsible for decompressing raw packets into audio frames.
     decoder: Decoder,
 
-    /// The fundamental unit of time representation for the current stream.
-    time_base: TimeBase,
+    /// Maps the stream's raw timestamps onto the public timeline.
+    timeline: Timeline,
 
-    /// Raw stream PTS that maps to the public zero-based timeline.
-    timeline_origin_pts: i64,
-
-    /// The presentation timestamp (PTS) of the most recently decoded frame, if available.
+    /// The public timestamp of the most recently delivered frame, if available.
     current_pts: Option<Duration>,
+
+    /// The public end time of the most recently delivered frame, if available.
+    current_end: Option<Duration>,
 
     /// Indicates whether the internal stream has reached the End Of File (EOF).
     is_exhausted: bool,
 
-    /// Indicates whether a valid frame was decoded and buffered during a seek operation,
-    /// waiting to be consumed by the next read invocation.
-    has_buffered_seek_frame: bool,
-    /// Stores the calculated sample offset for the buffered seek frame
-    buffered_seek_offset: usize,
+    /// Placement of a frame decoded during an accurate seek and still held by the decoder,
+    /// waiting to be delivered by the next read invocation.
+    pending_seek_frame: Option<FramePlacement>,
 }
 
 impl DecodeEngine {
-    /// Constructs a new `DecodeEngine` by taking full ownership of a demuxer and a decoder.
-    ///
-    /// # Arguments
-    /// * `demuxer` - A fully initialized demuxer pointing to a valid audio stream.
-    /// * `decoder` - A fully initialized decoder configured with the matching codec parameters.
+    /// Constructs a new `DecodeEngine` reading from the given source.
     ///
     /// # Returns
-    /// * `Ok(DecodeEngine)` if the engine is successfully initialized and the time base is valid.
-    /// * `Err(AudioError)` if the demuxer fails to provide a valid time base for synchronization.
+    /// * `Ok(DecodeEngine)` if the source is opened and the time base is valid.
+    /// * `Err(AudioError)` if the source cannot be opened or decoded, or the demuxer fails to
+    ///   provide a valid time base for synchronization.
     pub fn new<T>(source: T) -> Result<Self>
     where
         T: Read + Seek + Send + 'static,
@@ -91,32 +92,24 @@ impl DecodeEngine {
         let codec_params = demuxer.stream_codec_params();
         let decoder = Decoder::new(codec_params)?;
 
-        let time_base = demuxer.time_base()?;
-        let timeline_origin_pts = demuxer.timeline_origin_pts();
+        let timeline = Timeline::new(demuxer.time_base()?, demuxer.start_time())?;
 
         Ok(Self {
             demuxer,
             decoder,
-            time_base,
-            timeline_origin_pts,
+            timeline,
             current_pts: None,
+            current_end: None,
             is_exhausted: false,
-            has_buffered_seek_frame: false,
-            buffered_seek_offset: 0,
+            pending_seek_frame: None,
         })
     }
 
     fn debug_verify(&self) {
         debug_assert!(
-            !(self.is_exhausted && self.has_buffered_seek_frame),
+            !(self.is_exhausted && self.pending_seek_frame.is_some()),
             "Stream is marked as exhausted, but a buffered seek frame is present."
         );
-
-        let tb = self.time_base.as_rational();
-
-        debug_assert!(tb.den > 0, "Time base denominator is zero or negative.");
-
-        debug_assert!(tb.num > 0, "Time base numerator is zero or negative.");
     }
 
     /// Pulls and decodes the next available audio frame from the underlying stream.
@@ -132,52 +125,44 @@ impl DecodeEngine {
             return Ok(None);
         }
 
-        if self.has_buffered_seek_frame {
-            self.has_buffered_seek_frame = false;
-            let frame_ptr = self.decoder.current_frame();
-            let audio_frame = AudioFrame::new(frame_ptr, self.time_base)
-                .with_timeline_origin(self.timeline_origin_pts)
-                .with_offset(self.buffered_seek_offset);
+        let next = match self.pending_seek_frame.take() {
+            Some(placement) => Some(placement),
+            None => self.decode_next(Duration::ZERO)?,
+        };
+        let Some(placement) = next else {
+            return Ok(None);
+        };
 
-            self.buffered_seek_offset = 0;
-            self.current_pts = audio_frame.pts();
+        self.current_pts = placement.pts();
+        self.current_end = placement.end();
+        self.debug_verify();
 
-            self.debug_verify();
-            return Ok(Some(audio_frame));
-        }
+        Ok(Some(AudioFrame::new(
+            self.decoder.current_frame(),
+            placement,
+        )))
+    }
 
+    /// Decodes until the decoder holds a frame with samples at or after `not_before`, and
+    /// returns where that frame lands on the public timeline.
+    ///
+    /// Frames lying entirely before `not_before` are discarded. Returns `Ok(None)` once the
+    /// stream is exhausted.
+    fn decode_next(&mut self, not_before: Duration) -> Result<Option<FramePlacement>> {
         loop {
             match self.decoder.receive_frame() {
                 Ok(Some(frame)) => {
-                    let mut audio_frame = AudioFrame::new(frame, self.time_base)
-                        .with_timeline_origin(self.timeline_origin_pts);
+                    // The decoder has just filled this frame, so it points to a valid AVFrame.
+                    let timing = unsafe { frame_timing(frame) };
 
-                    if let (Some(start_us), Some(end_us)) =
-                        (audio_frame.pts_micros(), audio_frame.end_micros())
-                    {
-                        if end_us <= 0 {
-                            #[cfg(feature = "tracing")]
-                            tracing::debug!(
-                                "Dropped preroll frame (start: {start_us} us, end: {end_us} us)"
-                            );
-                            continue;
-                        }
-
-                        if start_us < 0 && audio_frame.offset() == 0 {
-                            let delta_us = 0 - start_us;
-                            let offset_samples = audio_frame.calc_samples(delta_us);
-
-                            if offset_samples < audio_frame.samples() {
-                                audio_frame = audio_frame.with_offset(offset_samples);
-                            } else {
-                                continue;
-                            }
-                        }
+                    if let Some(placement) = self.timeline.place(timing, not_before) {
+                        return Ok(Some(placement));
                     }
 
-                    self.current_pts = audio_frame.pts();
-                    self.debug_verify();
-                    return Ok(Some(audio_frame));
+                    #[cfg(feature = "tracing")]
+                    if not_before.is_zero() {
+                        tracing::debug!("Dropped preroll frame (raw pts: {})", timing.pts);
+                    }
                 }
                 Err(AudioError::Eagain) => {
                     if let Some(packet) = self.demuxer.read_packet()? {
@@ -185,7 +170,6 @@ impl DecodeEngine {
                     } else {
                         if self.decoder.is_flushing() {
                             self.is_exhausted = true;
-                            self.debug_verify();
                             return Ok(None);
                         }
 
@@ -194,7 +178,6 @@ impl DecodeEngine {
                 }
                 Ok(None) => {
                     self.is_exhausted = true;
-                    self.debug_verify();
                     return Ok(None);
                 }
                 Err(e) => return Err(e),
@@ -202,10 +185,11 @@ impl DecodeEngine {
         }
     }
 
-    /// Seeks the underlying audio stream to the specified target presentation time.
+    /// Seeks the underlying audio stream to the specified position on the public timeline.
     ///
     /// # Arguments
-    /// * `target` - The exact chronological point in the audio stream to seek to.
+    /// * `target` - The position on the public timeline to seek to.
+    /// * `mode` - The strategy ([`SeekMode`]) to employ for resolving the exact position.
     ///
     /// # Errors
     /// Returns an `AudioError` if the underlying demuxer fails to seek, or if a decoding
@@ -213,80 +197,42 @@ impl DecodeEngine {
     pub fn seek(&mut self, target: Duration, mode: SeekMode) -> Result<()> {
         self.debug_verify();
 
-        self.demuxer.seek_to(target)?;
+        self.demuxer.seek_to(self.timeline.seek_pts(target))?;
         self.decoder.flush();
 
         self.is_exhausted = false;
         self.current_pts = None;
-        self.has_buffered_seek_frame = false;
-        self.buffered_seek_offset = 0;
+        self.current_end = None;
+        self.pending_seek_frame = None;
 
-        if mode == SeekMode::Coarse {
-            self.debug_verify();
-            return Ok(());
-        }
-
-        let target_us = i64::try_from(target.as_micros()).unwrap_or(i64::MAX);
-
-        loop {
-            match self.receive_frame() {
-                Ok(Some(frame)) => {
-                    if let Some(pts_us) = frame.pts_micros() {
-                        if pts_us.saturating_add(frame.duration_micros()) >= target_us {
-                            let delta_us = target_us.saturating_sub(pts_us).max(0);
-
-                            let offset_samples = frame.calc_samples(delta_us);
-
-                            if offset_samples >= frame.samples() {
-                                continue;
-                            }
-
-                            self.has_buffered_seek_frame = true;
-                            self.buffered_seek_offset = offset_samples;
-                            break;
-                        }
-                    } else {
-                        return Err(AudioError::InvalidData(
-                            "Cannot perform accurate seek on a stream lacking valid timestamps."
-                                .to_string(),
-                        ));
-                    }
-                }
-                Ok(None) => break,
-                Err(e) => return Err(e),
+        if mode == SeekMode::Accurate
+            && let Some(placement) = self.decode_next(target)?
+        {
+            if placement.pts().is_none() {
+                return Err(AudioError::InvalidData(
+                    "Cannot perform accurate seek on a stream lacking valid timestamps."
+                        .to_string(),
+                ));
             }
+
+            self.pending_seek_frame = Some(placement);
         }
 
-        self.current_pts = None;
         self.debug_verify();
         Ok(())
     }
 
     /// Returns the position from which the next `receive_frame` call should resume.
     fn next_read_position(&self) -> Duration {
-        if self.has_buffered_seek_frame {
-            let frame_ptr = self.decoder.current_frame();
-            return AudioFrame::new(frame_ptr, self.time_base)
-                .with_timeline_origin(self.timeline_origin_pts)
-                .with_offset(self.buffered_seek_offset)
-                .pts()
-                .unwrap_or(Duration::ZERO);
+        if let Some(placement) = self.pending_seek_frame {
+            return placement.pts().unwrap_or(Duration::ZERO);
         }
 
-        if self.current_pts.is_none() {
-            return Duration::ZERO;
-        }
-
-        let frame_ptr = self.decoder.current_frame();
-        let frame = AudioFrame::new(frame_ptr, self.time_base)
-            .with_timeline_origin(self.timeline_origin_pts);
-
-        frame
-            .pts()
-            .map_or(Duration::ZERO, |pts| pts.saturating_add(frame.duration()))
+        self.current_end.unwrap_or(Duration::ZERO)
     }
 
-    /// Scans the audio stream to determine its exact total duration.
+    /// Scans the audio stream to determine its exact duration: the public time right after the
+    /// last sample.
     ///
     /// This operation performs internal seeking and state resets. It is recommended to
     /// call this method before establishing a continuous reading pipeline to prevent
@@ -296,48 +242,31 @@ impl DecodeEngine {
     /// * `mode` - The strategy ([`ScanMode`]) to employ during the scanning process.
     ///
     /// # Returns
-    /// * `Ok(Some(Duration))` representing the accurate total length of the audio stream.
+    /// * `Ok(Some(Duration))` representing the exact duration of the audio stream.
     /// * `Ok(None)` if the file is completely empty or lacks valid timestamp data.
     /// * `Err(AudioError)` if an I/O or parsing failure halts the scanning process.
     pub fn scan_duration(&mut self, mode: ScanMode) -> Result<Option<Duration>> {
         let was_exhausted = self.is_exhausted;
         let original_current_pts = self.current_pts;
+        let original_current_end = self.current_end;
 
         let original_position = self.next_read_position();
 
         self.seek(Duration::ZERO, SeekMode::Coarse)?;
 
-        let mut min_start_us: Option<i64> = None;
-        let mut max_end_us: Option<i64> = None;
-        let mut total_duration_us_fallback: i64 = 0;
+        let mut exact_end: Option<Duration> = None;
+        let mut total_duration_fallback = Duration::ZERO;
         let mut scan_error = None;
 
         match mode {
             ScanMode::Packet => loop {
                 match self.demuxer.read_packet() {
-                    Ok(Some(packet)) => unsafe {
-                        let pts = (*packet).pts;
-                        if pts == sys::AV_NOPTS_VALUE {
-                            continue;
-                        }
-
-                        if let Some(start_us) = self.time_base.calc_micros(pts) {
-                            let duration = (*packet).duration;
-                            let end_pts = if duration > 0 {
-                                pts.saturating_add(duration)
-                            } else {
-                                pts
-                            };
-                            let end_us = self.time_base.calc_micros(end_pts).unwrap_or(start_us);
-
-                            let safe_start = start_us.max(0);
-                            let safe_end = end_us.max(0);
-
-                            min_start_us =
-                                Some(min_start_us.map_or(safe_start, |m| m.min(safe_start)));
-                            max_end_us = Some(max_end_us.map_or(safe_end, |m| m.max(safe_end)));
-                        }
-                    },
+                    Ok(Some(packet)) => {
+                        // The demuxer has just filled this packet, so it points to a valid
+                        // AVPacket.
+                        let (pts, duration) = unsafe { ((*packet).pts, (*packet).duration) };
+                        exact_end = exact_end.max(self.timeline.packet_end(pts, duration));
+                    }
                     Ok(None) => break,
                     Err(e) => {
                         scan_error = Some(e);
@@ -348,15 +277,9 @@ impl DecodeEngine {
             ScanMode::Frame => loop {
                 match self.receive_frame() {
                     Ok(Some(frame)) => {
-                        total_duration_us_fallback =
-                            total_duration_us_fallback.saturating_add(frame.duration_micros());
-
-                        if let (Some(start_us), Some(end_us)) =
-                            (frame.pts_micros(), frame.end_micros())
-                        {
-                            min_start_us = Some(min_start_us.map_or(start_us, |m| m.min(start_us)));
-                            max_end_us = Some(max_end_us.map_or(end_us, |m| m.max(end_us)));
-                        }
+                        total_duration_fallback =
+                            total_duration_fallback.saturating_add(frame.duration());
+                        exact_end = exact_end.max(frame.end());
                     }
                     Ok(None) => break,
                     Err(e) => {
@@ -370,8 +293,8 @@ impl DecodeEngine {
         let seek_result = if was_exhausted {
             self.is_exhausted = true;
             self.current_pts = original_current_pts;
-            self.has_buffered_seek_frame = false;
-            self.buffered_seek_offset = 0;
+            self.current_end = original_current_end;
+            self.pending_seek_frame = None;
             Ok(())
         } else {
             self.seek(original_position, SeekMode::Accurate)
@@ -382,15 +305,18 @@ impl DecodeEngine {
         }
         seek_result?;
 
-        if let (Some(start), Some(end)) = (min_start_us, max_end_us) {
-            let duration_us = end.saturating_sub(start).max(0).cast_unsigned();
-            Ok(Some(Duration::from_micros(duration_us)))
-        } else if mode == ScanMode::Frame && total_duration_us_fallback > 0 {
-            let safe_duration = total_duration_us_fallback.max(0).cast_unsigned();
-            Ok(Some(Duration::from_micros(safe_duration)))
-        } else {
-            Ok(None)
-        }
+        Ok(exact_end.or_else(|| {
+            (mode == ScanMode::Frame && !total_duration_fallback.is_zero())
+                .then_some(total_duration_fallback)
+        }))
+    }
+
+    /// Returns the duration declared by the container, a quick estimate of the exact duration.
+    pub fn declared_duration(&self) -> Option<Duration> {
+        self.timeline.declared_duration(
+            self.demuxer.stream_duration(),
+            self.demuxer.container_duration(),
+        )
     }
 
     /// Returns a shared, immutable reference to the underlying demuxer.

@@ -7,6 +7,7 @@ use ffmpeg_audio::{
     AudioReader,
     RawAudioData,
     ResampleOptions,
+    ScanMode,
     SeekMode,
 };
 
@@ -43,6 +44,81 @@ fn generate_sine_wav(duration_secs: f32) -> Vec<u8> {
     }
 
     data
+}
+
+/// Decodes every remaining frame, returning each frame's timestamp and sample count.
+fn drain_frames(reader: &mut AudioReader) -> Vec<(Duration, usize)> {
+    let mut frames = Vec::new();
+    while let Some(frame) = reader.receive_frame().unwrap() {
+        let pts = frame.pts().expect("test sources carry timestamps");
+        frames.push((pts, frame.samples()));
+    }
+    frames
+}
+
+/// Returns whether `position` is the time of a sample that is decoded when reading the stream
+/// from the start, given that stream's `reference` frames.
+fn is_reference_sample_position(
+    reference: &[(Duration, usize)],
+    position: Duration,
+    sample_rate: u32,
+) -> bool {
+    let rate = u128::from(sample_rate);
+
+    reference.iter().any(|&(pts, samples)| {
+        position.checked_sub(pts).is_some_and(|delta| {
+            let index = (delta.as_nanos() * rate + 500_000_000) / 1_000_000_000;
+            let index_time = Duration::from_nanos((index * 1_000_000_000 / rate) as u64);
+            index < samples as u128 && delta.abs_diff(index_time) <= Duration::from_micros(1)
+        })
+    })
+}
+
+/// Checks the accurate seek contract at every target: the first delivered sample is a sample
+/// of the stream, at or after the target.
+///
+/// For sources whose timestamps count samples exactly (`sample_exact`), it additionally checks
+/// that exactly the samples before the target are skipped.
+fn assert_accurate_seek_contract(
+    open: impl Fn() -> AudioReader,
+    targets_ms: &[u64],
+    sample_exact: bool,
+) {
+    let mut reference_reader = open();
+    let sample_rate = u32::try_from(reference_reader.source_info().sample_rate).unwrap();
+    let reference = drain_frames(&mut reference_reader);
+    let total_samples: usize = reference.iter().map(|&(_, samples)| samples).sum();
+
+    for &target_ms in targets_ms {
+        let target = Duration::from_millis(target_ms);
+        let mut reader = open();
+        reader.seek(target, SeekMode::Accurate).unwrap();
+
+        let delivered = drain_frames(&mut reader);
+        let &(first_pts, _) = delivered
+            .first()
+            .unwrap_or_else(|| panic!("No frame delivered after seeking to {target:?}"));
+
+        assert!(
+            first_pts >= target,
+            "Seeking to {target:?} delivered a frame starting at {first_pts:?}"
+        );
+        assert!(
+            is_reference_sample_position(&reference, first_pts, sample_rate),
+            "Seeking to {target:?} started at {first_pts:?}, which is not the time of any sample \
+             decoded when reading from the start"
+        );
+
+        if sample_exact {
+            let skipped = (target.as_nanos() * u128::from(sample_rate)).div_ceil(1_000_000_000);
+            let remaining: usize = delivered.iter().map(|&(_, samples)| samples).sum();
+            assert_eq!(
+                remaining as u128 + skipped,
+                total_samples as u128,
+                "Seeking to {target:?} must deliver exactly the samples at or after the target"
+            );
+        }
+    }
 }
 
 #[test]
@@ -493,6 +569,61 @@ fn test_raw_data_signal_integrity_across_frames() {
     assert_eq!(global_sample_index, 4410, "解码出的样本总数不对");
 }
 
+#[test]
+fn test_accurate_seek_contract_on_generated_wav() {
+    let wav_data = generate_sine_wav(2.0);
+
+    assert_accurate_seek_contract(
+        || AudioReader::new(Cursor::new(wav_data.clone())).unwrap(),
+        &[0, 1, 3, 5, 10, 20, 50, 100, 250, 500, 999, 1500],
+        true,
+    );
+}
+
+#[test]
+fn test_accurate_seek_lands_on_the_first_sample_at_or_after_the_target() {
+    let mut reader = AudioReader::new(Cursor::new(generate_sine_wav(2.0))).unwrap();
+    reader
+        .seek(Duration::from_millis(1), SeekMode::Accurate)
+        .unwrap();
+
+    let pts = reader.receive_frame().unwrap().unwrap().pts();
+
+    // 1 ms falls between samples 44 and 45 at 44.1 kHz; sample 45 lies at 1020408.16 ns.
+    assert_eq!(pts, Some(Duration::from_nanos(1_020_408)));
+}
+
+#[test]
+fn test_seeking_to_a_reported_timestamp_lands_on_the_same_sample() {
+    let mut reader = AudioReader::new(Cursor::new(generate_sine_wav(2.0))).unwrap();
+    reader
+        .seek(Duration::from_millis(1), SeekMode::Accurate)
+        .unwrap();
+
+    let (pts, samples) = {
+        let frame = reader.receive_frame().unwrap().unwrap();
+        (frame.pts().unwrap(), frame.samples())
+    };
+
+    reader.seek(pts, SeekMode::Accurate).unwrap();
+    let frame = reader.receive_frame().unwrap().unwrap();
+
+    assert_eq!((frame.pts(), frame.samples()), (Some(pts), samples));
+}
+
+#[test]
+fn test_exact_duration_of_generated_wav() {
+    for mode in [ScanMode::Packet, ScanMode::Frame] {
+        let mut reader = AudioReader::new(Cursor::new(generate_sine_wav(2.0))).unwrap();
+
+        assert_eq!(
+            reader.scan_exact_duration(mode).unwrap(),
+            Some(Duration::from_secs(2)),
+            "{mode:?}"
+        );
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 mod file_tests {
     use std::fs::File;
@@ -645,5 +776,61 @@ mod file_tests {
             total_samples, 43_184,
             "Should trim exactly 0.1s of negative PTS data. Expected 43184 samples, got {total_samples}"
         );
+    }
+
+    #[test]
+    fn test_accurate_seek_contract_on_assets() {
+        let targets = [0, 1, 3, 5, 10, 20, 50, 100, 250, 500, 999];
+
+        for path in [AAC_SEEK_PATH, MUTATION_AAC_PATH] {
+            assert_accurate_seek_contract(
+                || AudioReader::new(File::open(path).unwrap()).unwrap(),
+                &targets,
+                true,
+            );
+        }
+
+        // Matroska stores timestamps in whole milliseconds, so they do not count samples exactly.
+        // Seeking cannot reach the first 7 ms of this file at all, and the file ends at 900 ms.
+        assert_accurate_seek_contract(
+            || AudioReader::new(File::open(NEGATIVE_PTS_MKV_PATH).unwrap()).unwrap(),
+            &targets[..10],
+            false,
+        );
+    }
+
+    #[test]
+    fn test_accurate_seek_trims_to_the_exact_sample() {
+        let mut reader = AudioReader::new(File::open(AAC_SEEK_PATH).unwrap()).unwrap();
+        reader
+            .seek(Duration::from_millis(100), SeekMode::Accurate)
+            .unwrap();
+
+        let frame = reader.receive_frame().unwrap().unwrap();
+
+        // 100 ms is sample 4800, which lies 704 samples into the frame starting at sample 4096.
+        assert_eq!(frame.pts(), Some(Duration::from_millis(100)));
+        assert_eq!(frame.samples(), 320);
+    }
+
+    #[test]
+    fn test_exact_duration_is_measured_from_zero() {
+        // The last frame starts at 881 ms and holds 896 samples at 48 kHz. Scanning cannot reach
+        // the first 7 ms of this file, which must not shorten the result.
+        let cases = [
+            (ScanMode::Frame, Duration::from_nanos(899_666_666)),
+            (ScanMode::Packet, Duration::from_millis(899)),
+        ];
+
+        for (mode, expected) in cases {
+            let file = File::open(NEGATIVE_PTS_MKV_PATH).unwrap();
+            let mut reader = AudioReader::new(file).unwrap();
+
+            assert_eq!(
+                reader.scan_exact_duration(mode).unwrap(),
+                Some(expected),
+                "{mode:?}"
+            );
+        }
     }
 }

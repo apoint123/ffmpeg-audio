@@ -6,6 +6,24 @@ All notable changes to `ffmpeg_audio` and `ffmpeg_audio_sys` will be documented 
 
 <!-- Changes not yet released go here -->
 
+### ffmpeg_audio
+
+#### Breaking Changes
+
+- **Removed** the public `TimeBase` type and the `core::time` module. Timestamp handling is now internal to the crate.
+- **Changed** `scan_exact_duration` to return the exact duration measured from zero: the time right after the last sample, rather than the span between the earliest and the latest timestamp found while scanning.
+
+#### Changed
+
+- **Changed** timestamps and durations (`AudioFrame::pts`, `AudioFrame::duration`, `stream_position`, `scan_exact_duration`) to be computed exactly and rounded down to whole nanoseconds, instead of being rounded to microseconds at every step. Seeking to a reported timestamp now lands on the same sample again.
+- **Documented** that `SeekMode::Coarse` and `SeekMode::Accurate` start at the nearest reachable position when the container cannot reach positions before the target, and that `AudioReader::duration` returns the duration declared by the container, which is an estimate.
+
+#### Fixed
+
+- **Fixed** accurate seeking trimming one sample too many when a frame timestamp is not a whole number of microseconds (e.g. seeking to 100 ms in a 48 kHz AAC stream now starts exactly at 100 ms instead of 100.02 ms).
+- **Fixed** accurate seeking discarding the preroll trim of the frame it lands on, which could deliver preroll samples when seeking close to the start of a stream with negative timestamps.
+- **Fixed** `scan_exact_duration` under-reporting the duration of streams whose first samples cannot be reached by seeking (e.g. 892.666 ms instead of 899.667 ms for a Matroska file with negative timestamps), and reporting a 2 s WAV file as 1.999999 s.
+
 ### ffmpeg_audio_sys
 
 #### Breaking Changes
