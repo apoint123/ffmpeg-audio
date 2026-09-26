@@ -82,7 +82,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@nightly
@@ -113,9 +113,9 @@ jobs:
       - name: Install LLVM-MinGW
         if: matrix.llvm_mingw
         run: |
-          wget https://github.com/mstorsjo/llvm-mingw/releases/download/20260602/llvm-mingw-20260602-ucrt-ubuntu-22.04-x86_64.tar.xz
-          tar -xf llvm-mingw-20260602-ucrt-ubuntu-22.04-x86_64.tar.xz
-          echo "$(pwd)/llvm-mingw-20260602-ucrt-ubuntu-22.04-x86_64/bin" >> $GITHUB_PATH
+          wget https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64.tar.xz
+          tar -xf llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64.tar.xz
+          echo "$(pwd)/llvm-mingw-20260922-ucrt-ubuntu-22.04-x86_64/bin" >> $GITHUB_PATH
 
       - name: Add Emscripten target
         if: matrix.emscripten
@@ -147,7 +147,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@nightly
@@ -162,7 +162,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@nightly
@@ -183,7 +183,7 @@ jobs:
         uses: pnpm/action-setup@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: lts/*
           cache: pnpm
