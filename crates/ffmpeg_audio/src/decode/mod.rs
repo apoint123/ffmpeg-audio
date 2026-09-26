@@ -1,3 +1,4 @@
+mod cursor;
 mod decoder;
 mod demuxer;
 mod engine;

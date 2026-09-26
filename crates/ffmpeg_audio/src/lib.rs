@@ -299,9 +299,10 @@ impl ResampledReader {
     /// method **before** you start pulling frames in your main processing loop.
     /// Calling it mid-playback may cause glitches due to the flushing.
     ///
-    /// Afterwards, reading resumes where it left off with an accurate seek. Where the container
-    /// cannot reach that position (for example the very start of some Matroska files), reading
-    /// resumes at the nearest reachable position after it.
+    /// Afterwards, reading continues exactly where it stood: the same frames follow, and
+    /// [`AudioReader::stream_position`] reports the same position until the next frame. Where the
+    /// container cannot reach that position (for example the very start of some Matroska files),
+    /// reading continues at the nearest reachable frame after it.
     ///
     /// # Parameters
     /// - `mode`:

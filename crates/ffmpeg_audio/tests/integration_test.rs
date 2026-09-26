@@ -121,6 +121,68 @@ fn assert_accurate_seek_contract(
     }
 }
 
+/// A point in reading at which a scan can interrupt it.
+#[derive(Debug, Clone, Copy)]
+enum ReadState {
+    Start,
+    AfterFrames,
+    AfterCoarseSeek,
+    AfterAccurateSeek,
+    Exhausted,
+}
+
+impl ReadState {
+    const ALL: [Self; 5] = [
+        Self::Start,
+        Self::AfterFrames,
+        Self::AfterCoarseSeek,
+        Self::AfterAccurateSeek,
+        Self::Exhausted,
+    ];
+
+    fn drive(self, reader: &mut AudioReader) {
+        let middle = Duration::from_millis(500);
+
+        match self {
+            Self::Start => {}
+            Self::AfterFrames => {
+                for _ in 0..3 {
+                    reader.receive_frame().unwrap().expect("stream too short");
+                }
+            }
+            Self::AfterCoarseSeek => reader.seek(middle, SeekMode::Coarse).unwrap(),
+            Self::AfterAccurateSeek => reader.seek(middle, SeekMode::Accurate).unwrap(),
+            Self::Exhausted => while reader.receive_frame().unwrap().is_some() {},
+        }
+    }
+}
+
+/// Checks that scanning the duration in each of `states` leaves reading exactly as it was: the
+/// same stream position, and the same frames afterwards.
+fn assert_scan_is_transparent(open: impl Fn() -> AudioReader, states: &[ReadState]) {
+    for &state in states {
+        for mode in [ScanMode::Packet, ScanMode::Frame] {
+            let mut scanned = open();
+            let mut untouched = open();
+            state.drive(&mut scanned);
+            state.drive(&mut untouched);
+
+            scanned.scan_exact_duration(mode).unwrap();
+
+            assert_eq!(
+                scanned.stream_position(),
+                untouched.stream_position(),
+                "Stream position after scanning in {state:?} with {mode:?}"
+            );
+            assert_eq!(
+                drain_frames(&mut scanned),
+                drain_frames(&mut untouched),
+                "Frames after scanning in {state:?} with {mode:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn test_audio_pipeline_and_signal_validation() {
     let wav_data = generate_sine_wav(1.0);
@@ -278,27 +340,12 @@ fn test_stream_position_resets_after_seek() {
 }
 
 #[test]
-fn test_scan_duration_resumes_after_the_current_frame() {
-    let wav_data = generate_sine_wav(1.0);
-    let mut reader = AudioReader::new(Cursor::new(wav_data)).unwrap();
+fn test_scan_is_transparent_on_generated_wav() {
+    let wav_data = generate_sine_wav(2.0);
 
-    let first_pts = {
-        let frame = reader.receive_frame().unwrap().unwrap();
-        frame.pts().unwrap()
-    };
-
-    reader
-        .scan_exact_duration(ffmpeg_audio::ScanMode::Frame)
-        .unwrap();
-
-    let next_pts = {
-        let frame = reader.receive_frame().unwrap().unwrap();
-        frame.pts().unwrap()
-    };
-
-    assert!(
-        next_pts > first_pts,
-        "scan 后不应重新交付已经消费的帧: first={first_pts:?}, next={next_pts:?}"
+    assert_scan_is_transparent(
+        || AudioReader::new(Cursor::new(wav_data.clone())).unwrap(),
+        &ReadState::ALL,
     );
 }
 
@@ -776,6 +823,43 @@ mod file_tests {
             total_samples, 43_184,
             "Should trim exactly 0.1s of negative PTS data. Expected 43184 samples, got {total_samples}"
         );
+    }
+
+    #[test]
+    fn test_scan_is_transparent_on_assets() {
+        for path in [AAC_SEEK_PATH, MUTATION_AAC_PATH] {
+            assert_scan_is_transparent(
+                || AudioReader::new(File::open(path).unwrap()).unwrap(),
+                &ReadState::ALL,
+            );
+        }
+
+        // The start of this file is not reachable by seeking; see the test below.
+        assert_scan_is_transparent(
+            || AudioReader::new(File::open(NEGATIVE_PTS_MKV_PATH).unwrap()).unwrap(),
+            &ReadState::ALL[1..],
+        );
+    }
+
+    #[test]
+    fn test_scan_at_an_unreachable_start_resumes_at_the_nearest_reachable_frame() {
+        let open = || AudioReader::new(File::open(NEGATIVE_PTS_MKV_PATH).unwrap()).unwrap();
+        let from_start = drain_frames(&mut open());
+
+        for mode in [ScanMode::Packet, ScanMode::Frame] {
+            let mut scanned = open();
+            scanned.scan_exact_duration(mode).unwrap();
+
+            assert_eq!(scanned.stream_position(), None);
+
+            // Reading skips the unreachable frames at the start and continues unchanged.
+            let resumed = drain_frames(&mut scanned);
+            assert!(
+                resumed.len() < from_start.len() && from_start.ends_with(&resumed),
+                "{mode:?}: resumed at {:?} instead of a later frame of the stream",
+                resumed.first()
+            );
+        }
     }
 
     #[test]

@@ -23,6 +23,7 @@ All notable changes to `ffmpeg_audio` and `ffmpeg_audio_sys` will be documented 
 - **Fixed** accurate seeking trimming one sample too many when a frame timestamp is not a whole number of microseconds (e.g. seeking to 100 ms in a 48 kHz AAC stream now starts exactly at 100 ms instead of 100.02 ms).
 - **Fixed** accurate seeking discarding the preroll trim of the frame it lands on, which could deliver preroll samples when seeking close to the start of a stream with negative timestamps.
 - **Fixed** `scan_exact_duration` under-reporting the duration of streams whose first samples cannot be reached by seeking (e.g. 892.666 ms instead of 899.667 ms for a Matroska file with negative timestamps), and reporting a 2 s WAV file as 1.999999 s.
+- **Fixed** `scan_exact_duration` disturbing reading: after a coarse seek it moved reading back to the start, and mid-stream it could drop samples (e.g. 16 samples in Matroska files, whose timestamps are rounded to milliseconds) or shift frame boundaries. Reading now continues with exactly the frames it would have delivered, and `stream_position` keeps its value until the next frame.
 
 ### ffmpeg_audio_sys
 

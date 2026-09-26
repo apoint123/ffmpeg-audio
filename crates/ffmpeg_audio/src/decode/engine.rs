@@ -21,6 +21,10 @@ use crate::{
     },
     decode::{
         SeekMode,
+        cursor::{
+            ReadCursor,
+            Resume,
+        },
         io::IoContext,
     },
 };
@@ -60,18 +64,8 @@ pub struct DecodeEngine {
     /// Maps the stream's raw timestamps onto the public timeline.
     timeline: Timeline,
 
-    /// The public timestamp of the most recently delivered frame, if available.
-    current_pts: Option<Duration>,
-
-    /// The public end time of the most recently delivered frame, if available.
-    current_end: Option<Duration>,
-
-    /// Indicates whether the internal stream has reached the End Of File (EOF).
-    is_exhausted: bool,
-
-    /// Placement of a frame decoded during an accurate seek and still held by the decoder,
-    /// waiting to be delivered by the next read invocation.
-    pending_seek_frame: Option<FramePlacement>,
+    /// Where reading stands.
+    cursor: ReadCursor,
 }
 
 impl DecodeEngine {
@@ -98,18 +92,8 @@ impl DecodeEngine {
             demuxer,
             decoder,
             timeline,
-            current_pts: None,
-            current_end: None,
-            is_exhausted: false,
-            pending_seek_frame: None,
+            cursor: ReadCursor::default(),
         })
-    }
-
-    fn debug_verify(&self) {
-        debug_assert!(
-            !(self.is_exhausted && self.pending_seek_frame.is_some()),
-            "Stream is marked as exhausted, but a buffered seek frame is present."
-        );
     }
 
     /// Pulls and decodes the next available audio frame from the underlying stream.
@@ -119,13 +103,11 @@ impl DecodeEngine {
     /// * `Ok(None)` if the stream has reached the End Of File (EOF).
     /// * `Err(AudioError)` if an I/O failure or a fatal FFmpeg decoding error occurs.
     pub fn receive_frame(&mut self) -> Result<Option<AudioFrame<'_>>> {
-        self.debug_verify();
-
-        if self.is_exhausted {
+        if self.cursor.is_exhausted() {
             return Ok(None);
         }
 
-        let next = match self.pending_seek_frame.take() {
+        let next = match self.cursor.pending() {
             Some(placement) => Some(placement),
             None => self.decode_next(Duration::ZERO)?,
         };
@@ -133,9 +115,7 @@ impl DecodeEngine {
             return Ok(None);
         };
 
-        self.current_pts = placement.pts();
-        self.current_end = placement.end();
-        self.debug_verify();
+        self.cursor.record_delivery(placement);
 
         Ok(Some(AudioFrame::new(
             self.decoder.current_frame(),
@@ -169,7 +149,7 @@ impl DecodeEngine {
                         self.decoder.send_packet(packet)?;
                     } else {
                         if self.decoder.is_flushing() {
-                            self.is_exhausted = true;
+                            self.cursor.record_exhaustion();
                             return Ok(None);
                         }
 
@@ -177,7 +157,7 @@ impl DecodeEngine {
                     }
                 }
                 Ok(None) => {
-                    self.is_exhausted = true;
+                    self.cursor.record_exhaustion();
                     return Ok(None);
                 }
                 Err(e) => return Err(e),
@@ -195,15 +175,9 @@ impl DecodeEngine {
     /// Returns an `AudioError` if the underlying demuxer fails to seek, or if a decoding
     /// error occurs during the frame alignment process.
     pub fn seek(&mut self, target: Duration, mode: SeekMode) -> Result<()> {
-        self.debug_verify();
-
         self.demuxer.seek_to(self.timeline.seek_pts(target))?;
         self.decoder.flush();
-
-        self.is_exhausted = false;
-        self.current_pts = None;
-        self.current_end = None;
-        self.pending_seek_frame = None;
+        self.cursor.record_coarse_seek(target);
 
         if mode == SeekMode::Accurate
             && let Some(placement) = self.decode_next(target)?
@@ -215,28 +189,41 @@ impl DecodeEngine {
                 ));
             }
 
-            self.pending_seek_frame = Some(placement);
+            self.cursor.record_pending(
+                Resume::Seek {
+                    target,
+                    mode: SeekMode::Accurate,
+                },
+                placement,
+            );
         }
 
-        self.debug_verify();
         Ok(())
     }
 
-    /// Returns the position from which the next `receive_frame` call should resume.
-    fn next_read_position(&self) -> Duration {
-        if let Some(placement) = self.pending_seek_frame {
-            return placement.pts().unwrap_or(Duration::ZERO);
+    /// Seeks so that reading continues with the frame following the one whose raw timestamp is
+    /// `raw_pts`, which is expected to start around `next`.
+    fn seek_after(&mut self, raw_pts: i64, next: Duration) -> Result<()> {
+        self.demuxer.seek_to(raw_pts)?;
+        self.decoder.flush();
+        self.cursor.record_coarse_seek(next);
+
+        while let Some(placement) = self.decode_next(Duration::ZERO)? {
+            if placement.raw_pts().is_none_or(|pts| pts > raw_pts) {
+                self.cursor
+                    .record_pending(Resume::After { raw_pts, next }, placement);
+                break;
+            }
         }
 
-        self.current_end.unwrap_or(Duration::ZERO)
+        Ok(())
     }
 
     /// Scans the audio stream to determine its exact duration: the public time right after the
     /// last sample.
     ///
-    /// This operation performs internal seeking and state resets. It is recommended to
-    /// call this method before establishing a continuous reading pipeline to prevent
-    /// disrupting the primary playback flow.
+    /// Reading afterwards continues where it stood, as if the scan had not happened (see
+    /// [`ReadCursor::resume`]).
     ///
     /// # Arguments
     /// * `mode` - The strategy ([`ScanMode`]) to employ during the scanning process.
@@ -246,11 +233,7 @@ impl DecodeEngine {
     /// * `Ok(None)` if the file is completely empty or lacks valid timestamp data.
     /// * `Err(AudioError)` if an I/O or parsing failure halts the scanning process.
     pub fn scan_duration(&mut self, mode: ScanMode) -> Result<Option<Duration>> {
-        let was_exhausted = self.is_exhausted;
-        let original_current_pts = self.current_pts;
-        let original_current_end = self.current_end;
-
-        let original_position = self.next_read_position();
+        let saved = self.cursor;
 
         self.seek(Duration::ZERO, SeekMode::Coarse)?;
 
@@ -290,25 +273,29 @@ impl DecodeEngine {
             },
         }
 
-        let seek_result = if was_exhausted {
-            self.is_exhausted = true;
-            self.current_pts = original_current_pts;
-            self.current_end = original_current_end;
-            self.pending_seek_frame = None;
-            Ok(())
-        } else {
-            self.seek(original_position, SeekMode::Accurate)
-        };
+        let restore_result = self.restore(saved);
 
         if let Some(e) = scan_error {
             return Err(e);
         }
-        seek_result?;
+        restore_result?;
 
         Ok(exact_end.or_else(|| {
             (mode == ScanMode::Frame && !total_duration_fallback.is_zero())
                 .then_some(total_duration_fallback)
         }))
+    }
+
+    /// Puts reading back where `saved` stood, including the reported stream position.
+    fn restore(&mut self, saved: ReadCursor) -> Result<()> {
+        match saved.resume() {
+            Resume::Exhausted => self.cursor = saved,
+            Resume::Seek { target, mode } => self.seek(target, mode)?,
+            Resume::After { raw_pts, next } => self.seek_after(raw_pts, next)?,
+        }
+
+        self.cursor.restore_position(saved.stream_position());
+        Ok(())
     }
 
     /// Returns the duration declared by the container, a quick estimate of the exact duration.
@@ -335,6 +322,6 @@ impl DecodeEngine {
     /// * `Some(Duration)` representing the current playback position.
     /// * `None` if no frames have been successfully decoded yet, or immediately after a seek.
     pub const fn stream_position(&self) -> Option<Duration> {
-        self.current_pts
+        self.cursor.stream_position()
     }
 }

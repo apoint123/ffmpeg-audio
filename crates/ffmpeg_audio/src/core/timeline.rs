@@ -25,6 +25,7 @@ pub struct FrameTiming {
 /// time have been trimmed away.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FramePlacement {
+    raw_pts: Option<i64>,
     pts: Option<Duration>,
     end: Option<Duration>,
     duration: Duration,
@@ -33,6 +34,11 @@ pub struct FramePlacement {
 }
 
 impl FramePlacement {
+    /// Raw timestamp of the decoded frame, which identifies it within the stream.
+    pub const fn raw_pts(&self) -> Option<i64> {
+        self.raw_pts
+    }
+
     /// Public time of the first delivered sample, or `None` for frames without a raw timestamp.
     pub const fn pts(&self) -> Option<Duration> {
         self.pts
@@ -119,6 +125,7 @@ impl Timeline {
     pub fn place(&self, frame: FrameTiming, not_before: Duration) -> Option<FramePlacement> {
         if frame.pts == sys::AV_NOPTS_VALUE {
             return Some(FramePlacement {
+                raw_pts: None,
                 pts: None,
                 end: None,
                 duration: samples_to_duration(frame.samples, frame.sample_rate),
@@ -135,6 +142,7 @@ impl Timeline {
         let samples = frame.samples - offset;
 
         Some(FramePlacement {
+            raw_pts: Some(frame.pts),
             pts: Some(duration_from_nanos(self.floor_nanos(
                 start,
                 offset,
