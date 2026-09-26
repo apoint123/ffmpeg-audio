@@ -6,6 +6,14 @@ All notable changes to `ffmpeg_audio` and `ffmpeg_audio_sys` will be documented 
 
 <!-- Changes not yet released go here -->
 
+### ffmpeg_audio_sys
+
+#### Breaking Changes
+
+- **Updated** bundled FFmpeg from 8.1.2 to 9.0.2 (libavcodec 63, libavformat 63, libavutil 61, libswresample 7). APIs removed upstream in this major release (e.g. `AVCodecContext.properties`, the private fields of `AVCodecParser`, `AVTimebaseSource`) are no longer available in the generated bindings.
+
+---
+
 ## [0.3.1] - 2026-08-05
 
 ### ffmpeg_audio
