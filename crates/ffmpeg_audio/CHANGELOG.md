@@ -1,0 +1,68 @@
+# ffmpeg_audio
+
+## [0.3.1] - 2026-08-05
+
+### Refactored
+
+- **Refactored** HTTP reconnection handling to automatically reconnect when the server closes the connection unexpectedly, using bounded exponential backoff.
+- **Refactored** HTTP range request validation to verify the `Content-Range` start offset and total length for the initial request and subsequent seeks or reconnects.
+
+## [0.3.0] - 2026-08-05
+
+### Breaking Changes
+
+- **Changed** HTTP cancellation to use the new thread-safe, opaque `HttpCancelHandle` API.
+- **Removed** `HttpAudioSource::new_with_token`; use `HttpAudioSource::new_with_cancel_handle` instead.
+
+### Added
+
+- **Added** `HttpCancelHandle::cancel`, `reset`, and `is_cancelled` for controlling cancellation and reusing an HTTP audio source.
+
+### Fixed
+
+- **Fixed** cancellation behavior so ongoing network operations can be interrupted immediately and subsequent operations can continue after resetting the handle.
+
+## [0.2.0] - 2026-07-21
+
+### Breaking Changes
+
+- **Changed** log feature to be disabled by default.
+
+### Added
+
+- **Added** API to get raw PCM data directly, bypassing the resampler.
+
+### Refactored
+
+- **Refactored** HTTP stream implementation using `tokio` and `reqwest` to support cancellation at any point.
+- **Refactored** negative PTS handling to be unified across the codebase.
+- **Refactored** stream scanning to skip irrelevant streams.
+- **Refactored** cover stream scanning to continue after encountering invalid streams.
+- **Refactored** duration scanning for more precise results.
+- **Refactored** seeking for more precise position accuracy.
+- **Refactored** added more defensive code paths.
+
+### Fixed
+
+- **Fixed** unified audio timeline and hardened resampling safety boundaries.
+
+## [0.1.2] - 2026-07-14
+
+- **Added** `Send` implementation for `ChannelLayout`, enabling it to be safely transferred across threads.
+- **Added** `Sync` implementation for `ChannelLayout`, enabling shared references across threads.
+- **Added** `Send` implementation for `Resampler`, enabling it to be safely transferred across threads.
+
+## [0.1.1] - 2026-07-14
+
+- **Changed** package description from "High-level Rust audio processing, decoding, and resampling engine based on FFmpeg." to "A lightweight FFmpeg audio decoding wrapper designed for music player applications."
+
+## [0.1.0] - 2026-07-14
+
+- Initial release of the high-level audio decoding and resampling crate built on top of `ffmpeg_audio_sys`.
+
+[0.3.1]: https://github.com/apoint123/ffmpeg-audio/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/apoint123/ffmpeg-audio/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/apoint123/ffmpeg-audio/compare/v0.1.2...v0.2.0
+[0.1.2]: https://github.com/apoint123/ffmpeg-audio/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/apoint123/ffmpeg-audio/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/apoint123/ffmpeg-audio/releases/tag/v0.1.0

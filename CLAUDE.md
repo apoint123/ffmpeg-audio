@@ -57,5 +57,5 @@ Feature：`http` 提供 `core/http.rs`（基于 HTTP Range 请求的阻塞式 `R
 - Rust 代码注释与 rustdoc 用英文；领域文档（`CONTEXT.md`、`docs/adr/`）用中文。命名与文档使用 `CONTEXT.md` 中的术语，避开各条目 `_Avoid_` 后列出的说法。
 - 各 crate 启用了 clippy `pedantic` + `nursery`，CI 以 `-D warnings` 运行，这类警告同样会让 CI 失败。
 - 提交信息：Conventional Commits，中文描述；`ffmpeg_audio` 的改动用 scope `core`，破坏性变更加 `!`（如 `refactor(core)!: ...`）。
-- 用户可见的改动写入 `CHANGELOG.md` 的 `[Unreleased]`：英文，按 crate 分节，下设 Breaking Changes / Added / Changed / Fixed，每条以加粗动词开头。
+- 用户可见的改动用 `pnpm changeset` 新增一个碎片（`.changeset/*.md`），不要直接改 `CHANGELOG.md`：一个碎片写一条英文记录，以加粗动词开头；0.x 阶段破坏性变更写 `minor`、其余写 `patch`，不写 `major`；sys 有破坏性变更时同一碎片里给 `ffmpeg_audio` 也写 `minor`。详见 `.changeset/README.md`。发版由 CI 完成（合并 release PR 即发版，见 `docs/adr/0002-*.md`），不要手动改版本号或打 tag。
 - TS 由 biome 格式化（tab 缩进、双引号），`pnpm lint` 带 `--error-on-warnings`。
