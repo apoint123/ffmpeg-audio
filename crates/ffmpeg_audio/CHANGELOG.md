@@ -1,5 +1,31 @@
 # ffmpeg_audio
 
+## 0.4.0
+
+### Minor Changes
+
+- [`6d7e7dc`](https://github.com/apoint123/ffmpeg-audio/commit/6d7e7dcce4073ba62176049d7e88d3514dc24919) Thanks [@apoint123](https://github.com/apoint123)! - **Removed** the public `TimeBase` type and the `core::time` module. Timestamp handling is now internal to the crate.
+
+- [`6d7e7dc`](https://github.com/apoint123/ffmpeg-audio/commit/6d7e7dcce4073ba62176049d7e88d3514dc24919) Thanks [@apoint123](https://github.com/apoint123)! - **Changed** `scan_exact_duration` to return the exact duration measured from zero: the time right after the last sample, rather than the span between the earliest and the latest timestamp found while scanning.
+
+- [#13](https://github.com/apoint123/ffmpeg-audio/pull/13) [`0dff143`](https://github.com/apoint123/ffmpeg-audio/commit/0dff143bfd9b9b8b11436882970559d930a49ef0) Thanks [@apoint123](https://github.com/apoint123)! - **Updated** bundled FFmpeg from 8.1.2 to 9.0.2 (libavcodec 63, libavformat 63, libavutil 61, libswresample 7). APIs removed upstream in this major release (e.g. `AVCodecContext.properties`, the private fields of `AVCodecParser`, `AVTimebaseSource`) are no longer available in the generated bindings.
+
+### Patch Changes
+
+- [`6d7e7dc`](https://github.com/apoint123/ffmpeg-audio/commit/6d7e7dcce4073ba62176049d7e88d3514dc24919) Thanks [@apoint123](https://github.com/apoint123)! - **Documented** that `SeekMode::Coarse` and `SeekMode::Accurate` start at the nearest reachable position when the container cannot reach positions before the target, and that `AudioReader::duration` returns the duration declared by the container, which is an estimate.
+
+- [`6d7e7dc`](https://github.com/apoint123/ffmpeg-audio/commit/6d7e7dcce4073ba62176049d7e88d3514dc24919) Thanks [@apoint123](https://github.com/apoint123)! - **Changed** timestamps and durations (`AudioFrame::pts`, `AudioFrame::duration`, `stream_position`, `scan_exact_duration`) to be computed exactly and rounded down to whole nanoseconds, instead of being rounded to microseconds at every step. Seeking to a reported timestamp now lands on the same sample again.
+
+- [`6d7e7dc`](https://github.com/apoint123/ffmpeg-audio/commit/6d7e7dcce4073ba62176049d7e88d3514dc24919) Thanks [@apoint123](https://github.com/apoint123)! - **Fixed** accurate seeking discarding the preroll trim of the frame it lands on, which could deliver preroll samples when seeking close to the start of a stream with negative timestamps.
+
+- [`6d7e7dc`](https://github.com/apoint123/ffmpeg-audio/commit/6d7e7dcce4073ba62176049d7e88d3514dc24919) Thanks [@apoint123](https://github.com/apoint123)! - **Fixed** accurate seeking trimming one sample too many when a frame timestamp is not a whole number of microseconds (e.g. seeking to 100 ms in a 48 kHz AAC stream now starts exactly at 100 ms instead of 100.02 ms).
+
+- [`6676910`](https://github.com/apoint123/ffmpeg-audio/commit/6676910472a059443a25bfd7547c5298a9a1d516) Thanks [@apoint123](https://github.com/apoint123)! - **Fixed** `scan_exact_duration` disturbing reading: after a coarse seek it moved reading back to the start, and mid-stream it could drop samples (e.g. 16 samples in Matroska files, whose timestamps are rounded to milliseconds) or shift frame boundaries. Reading now continues with exactly the frames it would have delivered, and `stream_position` keeps its value until the next frame.
+
+- [`6d7e7dc`](https://github.com/apoint123/ffmpeg-audio/commit/6d7e7dcce4073ba62176049d7e88d3514dc24919) Thanks [@apoint123](https://github.com/apoint123)! - **Fixed** `scan_exact_duration` under-reporting the duration of streams whose first samples cannot be reached by seeking (e.g. 892.666 ms instead of 899.667 ms for a Matroska file with negative timestamps), and reporting a 2 s WAV file as 1.999999 s.
+- Updated dependencies [[`2876aba`](https://github.com/apoint123/ffmpeg-audio/commit/2876abacdfb26eb01ce1b5af343392baba8d0be6), [`2876aba`](https://github.com/apoint123/ffmpeg-audio/commit/2876abacdfb26eb01ce1b5af343392baba8d0be6)]:
+  - ffmpeg_audio_sys@0.2.0
+
 ## [0.3.1] - 2026-08-05
 
 ### Refactored
