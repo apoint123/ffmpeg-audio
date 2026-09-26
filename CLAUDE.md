@@ -22,6 +22,7 @@ pnpm lint && pnpm format:check && pnpm typecheck             # TS 检查（仓�
 - HTTP 测试需要 `http` feature，且被 `#[ignore]`：先在 `crates/ffmpeg_audio/tests/` 下运行 `go run server.go`（它按相对路径读取 `assets/`），再运行 `cargo test -p ffmpeg_audio --features http --test http_test -- --ignored`。
 - Web demo：在 `web/` 下运行 `pnpm wasm`（需 emsdk 与 `wasm-pack`；构建 `ffmpeg_wasm` 与 `soundtouch`，并把产物复制进 `web/src/audio-core/{worker,worklet}/wasm/`，这些产物已被 gitignore），然后运行 `pnpm dev`。
 - 文件类测试（`integration_test.rs` 的 `file_tests` 模块）在 wasm32 上被 cfg 掉；`tests/assets/` 下每个素材各对应一种边界情况（AAC seek、流中途格式变化、负 PTS 的 Matroska）。
+- CI 的 target 矩阵定义在 `scripts/ci/platforms.ts`：PR 与发版前跑完整矩阵，`main` 上的普通提交只跑 `PUSH_PLATFORMS` 里的代表性子集。因此改动下列任一项后，必须手动跑一次完整矩阵（`gh workflow run ci.yml`，`full` 默认即 true）并等它通过，再提交或合并——常驻子集覆盖不到其余平台：`crates/ffmpeg_audio_sys/**`（`get_config_dir_name()`、`src/consts.rs`、`vendor/`）、`scripts/generate_config.ts`、`scripts/extract_slim.ts`、`.github/workflows/update-ffmpeg.yml`、`.cargo/config.toml` 与工作区 `Cargo.toml` 的 profile、以及任何 `#[cfg(target_os / target_arch / target_env / target_abi)]` 分支。
 
 ## 架构
 

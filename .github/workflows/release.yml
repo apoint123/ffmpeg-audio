@@ -90,12 +90,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PUSH_BEFORE: ${{ github.event.before }}
 
-  # 发布前对要发布的提交完整跑一遍 CI
+  # 发布前对要发布的提交完整跑一遍 CI。必须传 full: true：
+  # release.yml 由 push 触发，ci.yml 里的 github.event_name 是调用方的事件名（push），
+  # 不传这个输入会被当成 main 上的普通提交而降级成常驻子集。
   ci:
     name: CI
     needs: plan
     if: needs.plan.outputs.has-pending == 'true'
     uses: ./.github/workflows/ci.yml
+    with:
+      full: true
 
   publish:
     name: Publish
