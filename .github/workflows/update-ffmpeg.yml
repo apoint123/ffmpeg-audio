@@ -76,7 +76,7 @@ jobs:
 
       - name: Clone FFmpeg
         run: |
-          git clone --depth 1 --branch n8.1.2 https://github.com/FFmpeg/FFmpeg.git ffmpeg
+          git clone --depth 1 --branch n9.0.2 https://github.com/FFmpeg/FFmpeg.git ffmpeg
           cp scripts/generate_config.ts ffmpeg/
 
       - name: Run Configuration Script
@@ -124,7 +124,7 @@ jobs:
 
       - name: Clone FFmpeg
         run: |
-          git clone --depth 1 --branch n8.1.2 https://github.com/FFmpeg/FFmpeg.git ffmpeg
+          git clone --depth 1 --branch n9.0.2 https://github.com/FFmpeg/FFmpeg.git ffmpeg
           cp scripts/generate_config.ts ffmpeg/
 
       - name: Run Configuration Script
@@ -190,7 +190,7 @@ jobs:
       - name: Clone FFmpeg and Run Script
         shell: msys2 {0}
         run: |
-          git clone --depth 1 --branch n8.1.2 https://github.com/FFmpeg/FFmpeg.git ffmpeg
+          git clone --depth 1 --branch n9.0.2 https://github.com/FFmpeg/FFmpeg.git ffmpeg
           cp scripts/generate_config.ts ffmpeg/
           cd ffmpeg
           node generate_config.ts ${{ matrix.os }} ${{ matrix.arch }}
@@ -239,7 +239,7 @@ jobs:
           done
 
       - name: Clone FFmpeg
-        run: git clone --depth 1 --branch n8.1.2 https://github.com/FFmpeg/FFmpeg.git ffmpeg
+        run: git clone --depth 1 --branch n9.0.2 https://github.com/FFmpeg/FFmpeg.git ffmpeg
 
       - name: Generate ffmpeg_slim and pack zips
         run: |
