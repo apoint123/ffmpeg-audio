@@ -8,6 +8,7 @@ keywords = ["ffmpeg", "audio", "ffi", "bindings"]
 categories = ["external-ffi-bindings", "multimedia::audio"]
 version = "0.1.2"
 edition = "2024"
+exclude = ["package.json"]
 
 [lib]
 doctest = false

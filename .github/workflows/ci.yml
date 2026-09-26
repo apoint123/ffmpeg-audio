@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # 发版前由 release.yml 调用
+  workflow_call:
 
 jobs:
   test:
@@ -199,3 +201,9 @@ jobs:
 
       - name: Type check
         run: pnpm run typecheck
+
+      - name: Check crate versions are in sync
+        run: node scripts/release/sync-cargo-versions.ts --check
+
+      - name: Check changesets
+        run: node scripts/release/check-release-plan.ts
